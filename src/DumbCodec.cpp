@@ -17,108 +17,24 @@
  *
  */
 
-#include "libXBMC_addon.h"
+#include <vector>
+
+#include <kodi/api2/Addon.hpp>
+#include <kodi/api2/addon/VFSUtils.hpp>
+#include <kodi/api2/audiodecoder/Addon.hpp>
 
 extern "C" {
 #include <dumb.h>
-#include "kodi_audiodec_dll.h"
-#include "AEChannelData.h"
-
-ADDON::CHelper_libXBMC_addon *XBMC           = NULL;
-
-//-- Create -------------------------------------------------------------------
-// Called on load. Addon should fully initalize or return error status
-//-----------------------------------------------------------------------------
-ADDON_STATUS ADDON_Create(void* hdl, void* props)
-{
-  if (!XBMC)
-    XBMC = new ADDON::CHelper_libXBMC_addon;
-
-  if (!XBMC->RegisterMe(hdl))
-  {
-    delete XBMC, XBMC=NULL;
-    return ADDON_STATUS_PERMANENT_FAILURE;
-  }
-
-  return ADDON_STATUS_OK;
 }
 
-//-- Stop ---------------------------------------------------------------------
-// This dll must cease all runtime activities
-// !!! Add-on master function !!!
-//-----------------------------------------------------------------------------
-void ADDON_Stop()
-{
-}
-
-//-- Destroy ------------------------------------------------------------------
-// Do everything before unload of this add-on
-// !!! Add-on master function !!!
-//-----------------------------------------------------------------------------
-void ADDON_Destroy()
-{
-  XBMC=NULL;
-}
-
-//-- HasSettings --------------------------------------------------------------
-// Returns true if this add-on use settings
-// !!! Add-on master function !!!
-//-----------------------------------------------------------------------------
-bool ADDON_HasSettings()
-{
-  return false;
-}
-
-//-- GetStatus ---------------------------------------------------------------
-// Returns the current Status of this visualisation
-// !!! Add-on master function !!!
-//-----------------------------------------------------------------------------
-ADDON_STATUS ADDON_GetStatus()
-{
-  return ADDON_STATUS_OK;
-}
-
-//-- GetSettings --------------------------------------------------------------
-// Return the settings for XBMC to display
-// !!! Add-on master function !!!
-//-----------------------------------------------------------------------------
-unsigned int ADDON_GetSettings(ADDON_StructSetting ***sSet)
-{
-  return 0;
-}
-
-//-- FreeSettings --------------------------------------------------------------
-// Free the settings struct passed from XBMC
-// !!! Add-on master function !!!
-//-----------------------------------------------------------------------------
-
-void ADDON_FreeSettings()
-{
-}
-
-//-- SetSetting ---------------------------------------------------------------
-// Set a specific Setting value (called from XBMC)
-// !!! Add-on master function !!!
-//-----------------------------------------------------------------------------
-ADDON_STATUS ADDON_SetSetting(const char *strSetting, const void* value)
-{
-  return ADDON_STATUS_OK;
-}
-
-//-- Announce -----------------------------------------------------------------
-// Receive announcements from XBMC
-// !!! Add-on master function !!!
-//-----------------------------------------------------------------------------
-void ADDON_Announce(const char *flag, const char *sender, const char *message, const void *data)
-{
-}
+using namespace AudioDecoder;
 
 struct dumbfile_mem_status
 {
   const uint8_t * ptr;
   unsigned offset, size;
 
-  dumbfile_mem_status() : offset(0), size(0), ptr(NULL) {}
+  dumbfile_mem_status() : offset(0), size(0), ptr(nullptr) {}
 
   ~dumbfile_mem_status()
   {
@@ -177,13 +93,12 @@ static long dumbfile_mem_get_size(void * f)
 }
 
 static DUMBFILE_SYSTEM mem_dfs = {
-  NULL, // open
+  nullptr, // open
   &dumbfile_mem_skip,
   &dumbfile_mem_getc,
   &dumbfile_mem_getnc,
-  NULL // close
+  nullptr // close
 };
-
 
 struct DumbContext
 {
@@ -191,111 +106,150 @@ struct DumbContext
   DUH_SIGRENDERER* sr;
 };
 
-
-void* Init(const char* strFile, unsigned int filecache, int* channels,
-           int* samplerate, int* bitspersample, int64_t* totaltime,
-           int* bitrate, AEDataFormat* format, const AEChannel** channelinfo)
+class CDumbCodec : AudioDecoder::CAddonInterface
 {
-  void* file = XBMC->OpenFile(strFile,0);
-  if (!file)
-    return NULL;
+public:
+  CDumbCodec(void* kodiInstance) : CAddonInterface(kodiInstance), m_dumb(nullptr) { }
+  virtual ~CDumbCodec() { }
+
+  virtual bool Init(std::string file, unsigned int filecache,
+                    int& channels, int& samplerate,
+                    int& bitspersample, int64_t& totaltime,
+                    int& bitrate, eAudioDataFormat& format,
+                    std::vector<eAudioChannel>& channellist) override;
+  virtual int ReadPCM(uint8_t* buffer, int size, int* actualsize) override;
+  virtual bool DeInit() override;
+ 
+private:
+  DumbContext* m_dumb;
+};
+
+bool CDumbCodec::Init(std::string filename, unsigned int filecache,
+                       int& channels, int& samplerate,
+                       int& bitspersample, int64_t& totaltime,
+                       int& bitrate, eAudioDataFormat& format,
+                       std::vector<eAudioChannel>& channellist)
+{
+  AddOn::CVFSFile file;
+  if (!file.OpenFile(filename, 0))
+    return false;
 
   dumbfile_mem_status memdata;
-  memdata.size = XBMC->GetFileLength(file);
+  memdata.size = file.GetLength();
   memdata.ptr = new uint8_t[memdata.size];
-  XBMC->ReadFile(file, const_cast<uint8_t*>(memdata.ptr), memdata.size);
-  XBMC->CloseFile(file);
+  file.Read(const_cast<uint8_t*>(memdata.ptr), memdata.size);
+  file.Close();
 
   DUMBFILE* f = dumbfile_open_ex(&memdata, &mem_dfs);
   if (!f)
-    return NULL;
+    return false;
 
-  DumbContext* result = new DumbContext;
+  m_dumb = new DumbContext;
 
   if (memdata.size >= 4 &&
       memdata.ptr[0] == 'I' && memdata.ptr[1] == 'M' &&
       memdata.ptr[2] == 'P' && memdata.ptr[3] == 'M')
   {
-    result->module = dumb_read_it(f);
+    m_dumb->module = dumb_read_it(f);
   }
   else if (memdata.size >= 17 &&
            memcmp(memdata.ptr, "Extended Module: ", 17) == 0)
   {
-    result->module = dumb_read_xm(f);
+    m_dumb->module = dumb_read_xm(f);
   }
   else if (memdata.size >= 0x30 &&
            memdata.ptr[0x2C] == 'S' && memdata.ptr[0x2D] == 'C' &&
            memdata.ptr[0x2E] == 'R' && memdata.ptr[0x2F] == 'M')
   {
-    result->module = dumb_read_s3m(f);
+    m_dumb->module = dumb_read_s3m(f);
   }
   else
   {
     dumbfile_close(f);
-    delete result;
-    return NULL;
+    delete m_dumb;
+    m_dumb = nullptr;
+    return false;
   }
 
   dumbfile_close(f);
 
-  result->sr = duh_start_sigrenderer(result->module, 0, 2, 0);
+  m_dumb->sr = duh_start_sigrenderer(m_dumb->module, 0, 2, 0);
 
-  if (!result->sr)
+  if (!m_dumb->sr)
   {
-    delete result;
-    return NULL;
+    delete m_dumb;
+    m_dumb = nullptr;
+    return false;
   }
 
-  *channels = 2;
-  *samplerate = 48000;
-  *bitspersample = 16;
-  *totaltime = duh_get_length(result->module)/65536*1000;
-  *format = AE_FMT_S16NE;
-   static enum AEChannel map[3] = { AE_CH_FL, AE_CH_FR , AE_CH_NULL};
+  channels = 2;
+  samplerate = 48000;
+  bitspersample = 16;
+  totaltime = duh_get_length(m_dumb->module)/65536*1000;
+  format = AUDIO_FMT_S16NE;
+  channellist = { AUDIO_CH_FL, AUDIO_CH_FR, AUDIO_CH_NULL };
+  bitrate = duh_sigrenderer_get_n_channels(m_dumb->sr);
 
-  *channelinfo = map;
-  *bitrate = duh_sigrenderer_get_n_channels(result->sr);
-
-  return result;
+  return true;
 }
 
-int ReadPCM(void* context, uint8_t* pBuffer, int size, int *actualsize)
+int CDumbCodec::ReadPCM(uint8_t* buffer, int size, int* actualsize)
 {
-  DumbContext* dumb = (DumbContext*)context;
-  if (!context)
+  if (!m_dumb)
     return 1;
 
-  int rendered = duh_render(dumb->sr, 16, 0, 1.0,
+  int rendered = duh_render(m_dumb->sr, 16, 0, 1.0,
                             65536.0/48000.0,
-                            size/4,pBuffer);
+                            size/4, buffer);
   *actualsize = rendered*4;
 
   return 0;
 }
 
-int64_t Seek(void* context, int64_t time)
+bool CDumbCodec::DeInit()
 {
-  return time;
-}
+  if (m_dumb)
+  {
+    duh_end_sigrenderer(m_dumb->sr);
+    unload_duh(m_dumb->module);
+    delete m_dumb;
+    m_dumb = nullptr;
+    return true;
+  }
 
-bool DeInit(void* context)
-{
-  DumbContext* dumb = (DumbContext*)context;
-  duh_end_sigrenderer(dumb->sr);
-  unload_duh(dumb->module);
-  delete dumb;
-
-  return true;
-}
-
-bool ReadTag(const char* strFile, char* title, char* artist,
-             int* length)
-{
   return false;
 }
 
-int TrackCount(const char* strFile)
+//------------------------------------------------------------------------------
+//==============================================================================
+//------------------------------------------------------------------------------
+
+class CAddonDumbCodec : public CAddon
 {
-  return 1;
+public:
+  CAddonDumbCodec() { }
+
+  virtual eAddonStatus CreateInstance(eInstanceType instanceType, KODI_HANDLE* addonInstance, KODI_HANDLE kodiInstance) override;
+  virtual void DestroyInstance(KODI_HANDLE addonInstance) override;
+};
+
+eAddonStatus CAddonDumbCodec::CreateInstance(eInstanceType instanceType, KODI_HANDLE* addonInstance, KODI_HANDLE kodiInstance)
+{
+  KodiAPI::Log(ADDON_LOG_DEBUG, "%s - Creating the Dumb audio decoder add-on", __FUNCTION__);
+
+  if (instanceType != CAddon::instanceAudioDecoder)
+  {
+    KodiAPI::Log(ADDON_LOG_FATAL, "%s - Creation called with unsupported instance type", __FUNCTION__);
+    return addonStatus_PERMANENT_FAILURE;
+  }
+
+  *addonInstance = new CDumbCodec(kodiInstance);
+  return addonStatus_OK;
 }
+
+void CAddonDumbCodec::DestroyInstance(KODI_HANDLE addonInstance)
+{
+  delete static_cast<CDumbCodec*>(addonInstance);
 }
+
+ADDONCREATOR(CAddonDumbCodec); // Don't touch this!
