@@ -5,7 +5,7 @@ on: pull_request
 jobs:
   my-job:
     name: My Job
-    runs-on: windows-latest
+    runs-on: linux-latest
 
     steps:
     - name: Create addon
