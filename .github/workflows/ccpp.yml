@@ -8,18 +8,14 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v2
     - name: Create addon
-      uses: actions/setup-node@v1
-      with:
-        MY_VAR: Hi there! My name is
-        FIRST_NAME: Mona
-        MIDDLE_NAME: The
-        LAST_NAME: Octocat
-
-    - name: Create addon 2
       run: |
         echo ----------------
         echo ${MY_VAR}
         echo %FIRST_NAME%
         echo $LAST_NAME.
+      env:
+        MY_VAR: Hi there! My name is
+        FIRST_NAME: Mona
+        MIDDLE_NAME: The
+        LAST_NAME: Octocat
