@@ -1,4 +1,4 @@
- name: Binary addon build
+name: Binary addon build
 
 on: pull_request
 
