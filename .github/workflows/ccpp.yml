@@ -16,6 +16,6 @@ jobs:
         LAST_NAME: Octocat
       run: |
         echo ----------------
-        echo $MY_VAR
+        echo ${MY_VAR}
         echo %FIRST_NAME%
         echo $LAST_NAME.
