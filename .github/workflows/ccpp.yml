@@ -8,6 +8,7 @@ jobs:
     runs-on: macOS-latest
 
     steps:
+    - uses: actions/checkout@v2
     - name: Create addon
       env:
         MY_VAR: Hi there! My name is
