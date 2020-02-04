@@ -6,15 +6,16 @@ jobs:
   my-job:
     name: My Job
     runs-on: windows-2016
+    env:
+      MY_VAR: Hi there! My name is
+      FIRST_NAME: Mona
+      MIDDLE_NAME: The
+      LAST_NAME: Octocat
 
     steps:
     - name: Create addon
-      env:
-        MY_VAR: Hi there! My name is
-        FIRST_NAME: Mona
-        MIDDLE_NAME: The
-        LAST_NAME: Octocat
       run: |
+        echo ----------------
         echo $MY_VAR
         echo %FIRST_NAME%
         echo $LAST_NAME.
