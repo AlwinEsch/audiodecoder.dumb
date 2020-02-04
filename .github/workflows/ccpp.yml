@@ -9,13 +9,11 @@ jobs:
 
     steps:
     - name: Create addon
-      run: |
-        echo ----------------
-        echo ${MY_VAR}
-        echo %FIRST_NAME%
-        echo $LAST_NAME.
       env:
         MY_VAR: Hi there! My name is
         FIRST_NAME: Mona
         MIDDLE_NAME: The
         LAST_NAME: Octocat
+      run: |
+        echo ----------------
+        echo ${MY_VAR} $FIRST_NAME $LAST_NAME.
