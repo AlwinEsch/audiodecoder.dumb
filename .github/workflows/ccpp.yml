@@ -5,16 +5,19 @@ on: pull_request
 jobs:
   my-job:
     name: My Job
-    runs-on: macOS-latest
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v2
     - name: Create addon
-      env:
+      uses: actions/setup-node@v2
+      with:
         MY_VAR: Hi there! My name is
         FIRST_NAME: Mona
         MIDDLE_NAME: The
         LAST_NAME: Octocat
+
+    - name: Create addon 2
       run: |
         echo ----------------
         echo ${MY_VAR}
